@@ -865,7 +865,7 @@
       const [r, c] = rc(i);
       const isRoad = has(state.roads, i);
       const isAdjacent = isAdjacentToRoad(r, c);
-      const canRemove = isRoad && !wouldDisconnectRoad(i);
+      const canRemove = isRoad && !wouldDisconnectRoad(i) && !(r === 0 && c === 0);
       
       el.classList.toggle('road', isRoad);
       el.classList.toggle('house', (!isRoad && (housesMask & bit(i))!==0n));
@@ -944,6 +944,12 @@
     const isRoad = has(state.roads, cellIndex);
     
     if (isRoad) {
+      // Cannot remove starting cell (0,0)
+      if (r === 0 && c === 0) {
+        progressEl.textContent = 'Cannot remove starting road cell (0,0).';
+        return;
+      }
+      
       // Try to remove road cell if it doesn't disconnect the road
       if (!wouldDisconnectRoad(cellIndex)) {
         state.roads = state.roads & ~bit(cellIndex);
