@@ -64,7 +64,7 @@
   .dotbox .dot { width:12px; height:12px; border-radius:4px; outline:1px solid #3a4a66 }
   .dot-road { background: var(--road) }
   .dot-house { background: #16a34a }
-  .dot-free { background: #383b40 }
+  .dot-free { background: #a1a1aa }
   .wrap { display:grid; gap: 12px }
   .grid-wrap { background: linear-gradient(180deg, #0b1020, #050816); border:1px solid #172036; border-radius: 16px; padding: 16px; overflow:auto }
   .grid {
@@ -73,7 +73,7 @@
     justify-content: center;
   }
   .cell {
-    width: var(--cell); height: var(--cell); border-radius: 0; background: #383b40;
+    width: var(--cell); height: var(--cell); border-radius: 0; background: #a1a1aa;
     position: relative; overflow: hidden; isolation: isolate;
     cursor: pointer; transition: box-shadow 0.2s ease;
   }
@@ -85,8 +85,18 @@
     box-shadow: inset 0 0 10px rgba(239, 68, 68, 0.8);
   }
   .cell .coord { display:none }
-  .cell.road { background: var(--road) }
-  .cell.house { background: radial-gradient(120% 120% at 20% 10%, #16a34a, #065f46) }
+  .cell.road { 
+    background: #16a34a;
+    position: relative;
+  }
+  .cell.house { 
+    background: #16a34a; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    font-size: 32px;
+  }
+  .cell.house::before { content: '🏠'; }
   .cell .covered { position:absolute; inset:0; background: var(--covered); pointer-events:none; opacity:0; transition: opacity .15s ease }
   .cell.covered-on .covered { opacity: 1 }
   .stats { display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:10px }
@@ -811,6 +821,192 @@
   const state = { roads: 0n, coveredMask: 0n };
   let cells = [];
 
+  // SVG road sprites definitions
+  const roadSprites = `
+    <svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+      <defs>
+        <style>
+          .edge { fill:none; stroke:#666666; stroke-width:28; stroke-linecap:butt; }
+          .road { fill:none; stroke:#2b2b2b; stroke-width:26; stroke-linecap:butt; }
+          .mark { fill:none; stroke:#ffffff; stroke-width:2; stroke-linecap:butt; stroke-dasharray:2 2; }
+        </style>
+
+        <!-- Straight: horizontal -->
+        <g id="straight-h">
+          <path class="edge" d="M0,22 H44"/>
+          <path class="road" d="M0,22 H44"/>
+          <path class="mark" d="M0,22 H44"/>
+        </g>
+
+        <!-- Straight: vertical -->
+        <g id="straight-v">
+          <path class="edge" d="M22,0 V44"/>
+          <path class="road" d="M22,0 V44"/>
+          <path class="mark" d="M22,0 V44"/>
+        </g>
+
+        <!-- Curve from north to east -->
+        <g id="curve-ne">
+          <path class="edge" d="M22,0 A22,22 0 0 0 44,22"/>
+          <path class="road" d="M22,0 A22,22 0 0 0 44,22"/>
+          <path class="mark" d="M22,0 A22,22 0 0 0 44,22"/>
+        </g>
+        
+        <!-- Curve from east to south -->
+        <g id="curve-es">
+          <path class="edge" d="M44,22 A22,22 0 0 0 22,44"/>
+          <path class="road" d="M44,22 A22,22 0 0 0 22,44"/>
+          <path class="mark" d="M44,22 A22,22 0 0 0 22,44"/>
+        </g>
+        
+        <!-- Curve from south to west -->
+        <g id="curve-sw">
+          <path class="edge" d="M22,44 A22,22 0 0 0 0,22"/>
+          <path class="road" d="M22,44 A22,22 0 0 0 0,22"/>
+          <path class="mark" d="M22,44 A22,22 0 0 0 0,22"/>
+        </g>
+        
+        <!-- Curve from west to north -->
+        <g id="curve-wn">
+          <path class="edge" d="M0,22 A22,22 0 0 0 22,0"/>
+          <path class="road" d="M0,22 A22,22 0 0 0 22,0"/>
+          <path class="mark" d="M0,22 A22,22 0 0 0 22,0"/>
+        </g>
+
+        <!-- CROSS (4-way intersection) -->
+        <g id="cross">
+          <path class="edge" d="M22,0 V44 M0,22 H44"/>
+          <path class="road" d="M22,0 V44 M0,22 H44"/>
+          <path class="mark" d="M22,0 V44 M0,22 H44"/>
+        </g>
+
+        <!-- T with missing south (┴ shape) -->
+        <g id="tee-n">
+          <path class="edge" d="M22,0 V22 M0,22 H44"/>
+          <path class="road" d="M22,0 V22 M0,22 H44"/>
+          <path class="mark" d="M22,0 V22 M0,22 H44"/>
+        </g>
+
+        <!-- T with missing west (├ shape) -->
+        <g id="tee-e">
+          <path class="edge" d="M22,0 V44 M22,22 H44"/>
+          <path class="road" d="M22,0 V44 M22,22 H44"/>
+          <path class="mark" d="M22,0 V44 M22,22 H44"/>
+        </g>
+
+        <!-- T with missing north (┬ shape) -->
+        <g id="tee-s">
+          <path class="edge" d="M22,22 V44 M0,22 H44"/>
+          <path class="road" d="M22,22 V44 M0,22 H44"/>
+          <path class="mark" d="M22,24 V44 M0,22 H44"/>
+        </g>
+
+        <!-- T with missing east (┤ shape) -->
+        <g id="tee-w">
+          <path class="edge" d="M22,0 V44 M0,22 H22"/>
+          <path class="road" d="M22,0 V44 M0,22 H22"/>
+          <path class="mark" d="M22,0 V44 M0,22 H22"/>
+        </g>
+
+        <!-- Dead ends -->
+        <g id="deadend-n">
+          <path class="edge" d="M22,0 V42"/>
+          <path class="road" d="M22,0 V40"/>
+          <path class="mark" d="M22,0 V36"/>
+        </g>
+        
+        <g id="deadend-e">
+          <path class="edge" d="M44,22 H2"/>
+          <path class="road" d="M44,22 H4"/>
+          <path class="mark" d="M42,22 H10"/>
+        </g>
+        
+        <g id="deadend-s">
+          <path class="edge" d="M22,44 V2"/>
+          <path class="road" d="M22,44 V4"/>
+          <path class="mark" d="M22,42 V8"/>
+        </g>
+        
+        <g id="deadend-w">
+          <path class="edge" d="M0,22 H42"/>
+          <path class="road" d="M0,22 H40"/>
+          <path class="mark" d="M0,22 H30"/>
+        </g>
+      </defs>
+    </svg>
+  `;
+
+  // Create road SVG using sprites
+  function createRoadSVG(r, c) {
+    const idx = id(r, c);
+    // For cell (0,0), always create SVG even if not in roads state
+    if (!has(state.roads, idx) && !(r === 0 && c === 0)) return null;
+    
+    // Check connections to neighbors (up, right, down, left)
+    const up = (r > 0) && has(state.roads, id(r-1, c));
+    const right = (c < W-1) && has(state.roads, id(r, c+1));
+    const down = (r < H-1) && has(state.roads, id(r+1, c));
+    // For cell (0,0), assume there's a road to the left at (-1,0)
+    const left = (c > 0) && has(state.roads, id(r, c-1)) || (r === 0 && c === 0);
+    
+    let spriteId = '';
+    
+    // Count connections
+    const connections = [up, right, down, left];
+    const count = connections.filter(Boolean).length;
+    
+    if (count === 1) {
+      // Dead ends
+      if (up) spriteId = 'deadend-n';
+      else if (right) spriteId = 'deadend-e';  
+      else if (down) spriteId = 'deadend-s';
+      else if (left) spriteId = 'deadend-w';
+    } else if (count === 2) {
+      // Straight lines or corners
+      if (up && down) spriteId = 'straight-v';
+      else if (left && right) spriteId = 'straight-h';
+      else if (up && right) spriteId = 'curve-ne';
+      else if (right && down) spriteId = 'curve-es';
+      else if (down && left) spriteId = 'curve-sw';
+      else if (left && up) spriteId = 'curve-wn';
+    } else if (count === 3) {
+      // T-junctions
+      if (!up) spriteId = 'tee-s';     // T pointing down (missing up)
+      else if (!right) spriteId = 'tee-w';  // T pointing left (missing right)
+      else if (!down) spriteId = 'tee-n';   // T pointing up (missing down)
+      else if (!left) spriteId = 'tee-e';   // T pointing right (missing left)
+    } else if (count === 4) {
+      // Cross intersection
+      spriteId = 'cross';
+    }
+    
+    if (!spriteId) return null;
+    
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', '100%');
+    svg.setAttribute('height', '100%');
+    svg.setAttribute('viewBox', '0 0 44 44');
+    svg.style.position = 'absolute';
+    svg.style.top = '0';
+    svg.style.left = '0';
+    
+    const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    use.setAttributeNS('http://www.w3.org/1999/xlink', 'href', `#${spriteId}`);
+    svg.appendChild(use);
+    
+    return svg;
+  }
+
+  function initRoadSprites() {
+    // Add road sprites to DOM if not already present
+    if (!document.getElementById('road-sprites')) {
+      const container = document.createElement('div');
+      container.id = 'road-sprites';
+      container.innerHTML = roadSprites;
+      document.body.appendChild(container);
+    }
+  }
+
   function buildGrid() {
     gridEl.innerHTML = '';
     gridEl.style.gridTemplateColumns = `repeat(${W}, var(--cell))`;
@@ -856,13 +1052,30 @@
       const isAdjacent = isAdjacentToRoad(r, c);
       const canRemove = isRoad && !wouldDisconnectRoad(i) && !(r === 0 && c === 0);
       
-      el.classList.toggle('road', isRoad);
-      el.classList.toggle('house', (!isRoad && (housesMask & bit(i))!==0n));
+      // For cell (0,0), always apply road class
+      el.classList.toggle('road', isRoad || (r === 0 && c === 0));
+      // For cell (0,0), never apply house class (it's always road)
+      el.classList.toggle('house', (!isRoad && (housesMask & bit(i))!==0n && !(r === 0 && c === 0)));
       el.classList.toggle('covered-on', ((state.coveredMask & bit(i))!==0n));
       
       // Visual hints for clickable cells
       el.classList.toggle('clickable-add', !isRoad && isAdjacent);
       el.classList.toggle('clickable-remove', canRemove);
+      
+      // Set road SVG element
+      // Clear any existing SVG elements first
+      const existingSvg = el.querySelector('svg');
+      if (existingSvg) {
+        existingSvg.remove();
+      }
+      
+      // For cell (0,0), always show road SVG even if not in roads state
+      if (isRoad || (r === 0 && c === 0)) {
+        const roadSvg = createRoadSVG(r, c);
+        if (roadSvg) {
+          el.appendChild(roadSvg);
+        }
+      }
     }
     const houses = popcnt(housesMask);
     const roadLen = popcnt(state.roads);
@@ -996,6 +1209,7 @@
 
 
   // bootstrap
+  initRoadSprites();
   buildNeigh();
   buildGrid();
   initBoard();
