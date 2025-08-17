@@ -2,6 +2,8 @@
 
 An interactive web application for solving the optimal road placement problem to maximize the number of houses that can be built adjacent to the road.
 
+![Road layout example](road.png)
+
 🎮 **[Demo](https://fl0p.github.io/road/)**
 
 ## Problem Description
@@ -30,7 +32,7 @@ Given a rectangular grid of W × H cells, the goal is to design a road layout th
 
 ### Automatic Optimization
 - **Heuristic solver**: Fast beam search with lookahead and multiple restarts for good solutions
-- **Exact solver**: Branch-and-bound algorithm with memoization to find provably optimal solutions
+- **Exact solver**: DFS-based Branch-and-bound algorithm with memoization to find provably optimal solutions
 - **Real-time progress**: Shows search progress, nodes explored, and current best solution
 - **Weighted objective**: Optimizes houses - 0.2 × road length for balanced solutions
 - **Web Workers**: Non-blocking computation keeps UI responsive during optimization
