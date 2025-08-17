@@ -118,14 +118,14 @@
         <span class="sep"></span>
         <button id="solveHeuristic" class="primary">Heuristic Solve</button>
         <button id="stopHeuristic" class="danger">Stop</button>
-        <button id="solveExact" class="primary">Solve Optimally</button>
+        <button id="solveExact" class="primary">Solve Exactly</button>
         <button id="stopExact" class="danger">Stop</button>
       </div>
       <div class="desc">
         Grid <em>W × H</em>, starting road cell is <code>(0,0)</code>. You can extend the road up/down/left/right only (no diagonals) and the road must remain 4-connected.
         A house can be placed in any cell that shares a side with at least one road cell (no diagonals), and houses cannot overlap road.
         <br>
-        <b>The goal is to build a road shape that maximizes the count of such house cells.</b>
+        <b>The goal is to build a road shape that maximizes houses while minimizing road length (weighted objective: houses - 0.5 × road length).</b>
         <br>
         <b>Manual drawing:</b> Click adjacent empty cells to extend the road, or click road cells to remove them (if it doesn't break connectivity).
         This tool lets you build the road manually or compute an optimal solution. Coverage (cells at distance 1 from the road) is always shown.
@@ -398,6 +398,8 @@
           let covered0 = BigInt(msg.covered);
           let best = { roads: roads0, covered: covered0 };
           let bestH = popcnt((covered0 & ~roads0));
+          let bestRoadLen = popcnt(roads0);
+          let bestObj = bestH - 0.5 * bestRoadLen;
           function houses(roads, covered){ return popcnt((covered & ~roads)); }
 
           function lookaheadOnce(roads, covered, depth) {
@@ -490,11 +492,15 @@
               }
               for (const st of refined) {
                 const h = houses(st.roads, st.covered);
-                if (h > bestH) { 
+                const roadLen = popcnt(st.roads);
+                const obj = h - 0.5 * roadLen;
+                if (obj > bestObj) { 
                   bestH = h; 
+                  bestRoadLen = roadLen;
+                  bestObj = obj;
                   best = st; 
                   improved = true; 
-                  postMessage({type:'improvement', bestH, bestRoads: best.roads.toString(), bestCovered: best.covered.toString()});
+                  postMessage({type:'improvement', bestH, bestObj: bestObj.toFixed(1), bestRoadLen, bestRoads: best.roads.toString(), bestCovered: best.covered.toString()});
                 }
               }
               beamStates = refined;
@@ -508,9 +514,9 @@
           }
 
           if (cancelled) {
-            postMessage({type:'cancelled', bestH, bestRoads: best.roads.toString(), bestCovered: best.covered.toString()});
+            postMessage({type:'cancelled', bestH, bestObj: bestObj.toFixed(1), bestRoadLen, bestRoads: best.roads.toString(), bestCovered: best.covered.toString()});
           } else {
-            postMessage({type:'done', bestH, bestRoads: best.roads.toString(), bestCovered: best.covered.toString(), ms: Date.now()-start});
+            postMessage({type:'done', bestH, bestObj: bestObj.toFixed(1), bestRoadLen, bestRoads: best.roads.toString(), bestCovered: best.covered.toString(), ms: Date.now()-start});
           }
         }
       };
@@ -522,17 +528,17 @@
     heuristicWorker.onmessage = (e) => {
       const data = e.data;
       if (data.type === 'progress') {
-        progressEl.textContent = `Heuristic search… restart ${data.rep + 1}/${data.restarts}, best: ${data.bestH}`;
+        progressEl.textContent = `Heuristic search… restart ${data.rep + 1}/${data.restarts}, houses: ${data.bestH}, road: ${data.bestRoadLen || 'N/A'}, obj: ${data.bestObj || 'N/A'}`;
       } else if (data.type === 'improvement') {
-        progressEl.textContent = `Heuristic search… found better result: ${data.bestH}`;
+        progressEl.textContent = `Heuristic search… found better: houses: ${data.bestH}, road: ${data.bestRoadLen}, obj: ${data.bestObj}`;
         tryUpdateFromHeuristicWorker(data.bestRoads, data.bestCovered);
       } else if (data.type === 'done') {
-        progressEl.textContent = `Heuristic completed in ${data.ms} ms. Found ${data.bestH} houses.`;
+        progressEl.textContent = `Heuristic completed in ${data.ms} ms. Houses: ${data.bestH}, road: ${data.bestRoadLen}, obj: ${data.bestObj}`;
         tryUpdateFromHeuristicWorker(data.bestRoads, data.bestCovered, true);
         URL.revokeObjectURL(url);
         setSolverButtons(false, false); // no solvers running
       } else if (data.type === 'cancelled') {
-        progressEl.textContent = `Heuristic stopped. Best found: ${data.bestH} houses.`;
+        progressEl.textContent = `Heuristic stopped. Houses: ${data.bestH}, road: ${data.bestRoadLen}, obj: ${data.bestObj}`;
         tryUpdateFromHeuristicWorker(data.bestRoads, data.bestCovered);
         URL.revokeObjectURL(url);
         setSolverButtons(false, false); // no solvers running
@@ -639,6 +645,8 @@
           let roads = BigInt(msg.roads);
           let covered = BigInt(msg.covered);
           let bestH = houses(roads, covered), bestRoads = roads, bestCovered = covered;
+          let bestRoadLen = popcnt(roads);
+          let bestObj = bestH - 0.5 * bestRoadLen; // Initial weighted objective
           let nodes = 0;
           const start = Date.now();
           const Ntot = N;
@@ -684,14 +692,24 @@
             nodes++;
 
             const curH = houses(node.roads, node.covered);
-            if (curH > bestH) { bestH = curH; bestRoads = node.roads; bestCovered = node.covered; }
+            const curRoadLen = popcnt(node.roads);
+            const curObj = curH - 0.5 * curRoadLen; // Weighted objective: houses - 0.5 * roadLength
+            if (curObj > bestObj) { 
+              bestH = curH; 
+              bestRoadLen = curRoadLen;
+              bestObj = curObj;
+              bestRoads = node.roads; 
+              bestCovered = node.covered; 
+            }
 
-            // Upper bound prune (simple but cheap)
-            const ub = curH + (ub_trivial(node.roads) - curH); // == N - |R|
-            if (ub <= bestH) {
+            // Upper bound prune (weighted objective)
+            const ubHouses = curH + (ub_trivial(node.roads) - curH); // == N - |R|
+            const ubRoadLen = popcnt(node.roads); // Current road length (won't decrease)
+            const ubObj = ubHouses - 0.5 * ubRoadLen; // Upper bound for weighted objective
+            if (ubObj <= bestObj) {
               // ping occasionally
               const now = Date.now(); if (now - lastPing > 250) {
-                postMessage({type:'progress', nodes, bestH, bestRoads: bestRoads.toString(), bestCovered: bestCovered.toString()});
+                postMessage({type:'progress', nodes, bestH, bestObj: bestObj.toFixed(1), bestRoadLen, bestRoads: bestRoads.toString(), bestCovered: bestCovered.toString()});
                 lastPing = now;
               }
               continue;
@@ -701,7 +719,7 @@
             const prev = memo.get(key);
             if (prev !== undefined && prev >= curH) {
               const now = Date.now(); if (now - lastPing > 250) {
-                postMessage({type:'progress', nodes, bestH, bestRoads: bestRoads.toString(), bestCovered: bestCovered.toString()});
+                postMessage({type:'progress', nodes, bestH, bestObj: bestObj.toFixed(1), bestRoadLen, bestRoads: bestRoads.toString(), bestCovered: bestCovered.toString()});
                 lastPing = now;
               }
               continue;
@@ -712,7 +730,7 @@
             let F = frontier(node.roads);
             if (F === 0n) {
               const now = Date.now(); if (now - lastPing > 250) {
-                postMessage({type:'progress', nodes, bestH, bestRoads: bestRoads.toString(), bestCovered: bestCovered.toString()});
+                postMessage({type:'progress', nodes, bestH, bestObj: bestObj.toFixed(1), bestRoadLen, bestRoads: bestRoads.toString(), bestCovered: bestCovered.toString()});
                 lastPing = now;
               }
               continue;
@@ -732,15 +750,15 @@
 
             const now = Date.now();
             if (now - lastPing > 250) {
-              postMessage({type:'progress', nodes, bestH, bestRoads: bestRoads.toString(), bestCovered: bestCovered.toString()});
+              postMessage({type:'progress', nodes, bestH, bestObj: bestObj.toFixed(1), bestRoadLen, bestRoads: bestRoads.toString(), bestCovered: bestCovered.toString()});
               lastPing = now;
             }
           }
 
           if (cancelled) {
-            postMessage({type:'cancelled', nodes, bestH, bestRoads: bestRoads.toString(), bestCovered: bestCovered.toString()});
+            postMessage({type:'cancelled', nodes, bestH, bestObj: bestObj.toFixed(1), bestRoadLen, bestRoads: bestRoads.toString(), bestCovered: bestCovered.toString()});
           } else {
-            postMessage({type:'done', nodes, bestH, bestRoads: bestRoads.toString(), bestCovered: bestCovered.toString(), ms: Date.now()-start});
+            postMessage({type:'done', nodes, bestH, bestObj: bestObj.toFixed(1), bestRoadLen, bestRoads: bestRoads.toString(), bestCovered: bestCovered.toString(), ms: Date.now()-start});
           }
         }
       };
@@ -752,17 +770,17 @@
     exactWorker.onmessage = (e) => {
       const data = e.data;
       if (data.type === 'progress') {
-        progressEl.textContent = `Searching… nodes: ${data.nodes}, best result: ${data.bestH}`;
+        progressEl.textContent = `Searching… nodes: ${data.nodes}, houses: ${data.bestH}, road: ${data.bestRoadLen}, obj: ${data.bestObj}`;
         nodesEl.textContent = data.nodes;
         tryUpdateFromWorker(data.bestRoads, data.bestCovered);
       } else if (data.type === 'done') {
-        progressEl.textContent = `Done. Explored ${data.nodes} states in ${data.ms} ms. Best result: ${data.bestH}`;
+        progressEl.textContent = `Done. Explored ${data.nodes} states in ${data.ms} ms. Houses: ${data.bestH}, road: ${data.bestRoadLen}, obj: ${data.bestObj}`;
         nodesEl.textContent = data.nodes;
         tryUpdateFromWorker(data.bestRoads, data.bestCovered, true);
         URL.revokeObjectURL(url);
         setSolverButtons(false, false); // no solvers running
       } else if (data.type === 'cancelled') {
-        progressEl.textContent = `Stopped. Best found result: ${data.bestH}, explored nodes: ${data.nodes}`;
+        progressEl.textContent = `Stopped. Houses: ${data.bestH}, road: ${data.bestRoadLen}, obj: ${data.bestObj}, nodes: ${data.nodes}`;
         nodesEl.textContent = data.nodes;
         tryUpdateFromWorker(data.bestRoads, data.bestCovered);
         URL.revokeObjectURL(url);
