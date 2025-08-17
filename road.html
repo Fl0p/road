@@ -105,6 +105,7 @@
         <label>Height <input id="h" type="number" min="2" max="15" value="7"></label>
         <button id="resize">Reset</button>
         <span class="sep"></span>
+        <button id="solveHeuristic" class="primary">Heuristic Solve</button>
         <button id="solveExact" class="primary">Solve Optimally</button>
         <button id="stopExact" class="danger">Stop</button>
       </div>
@@ -682,6 +683,16 @@
     buildNeigh();
     buildGrid();
     initBoard();
+  });
+
+  document.getElementById('solveHeuristic').addEventListener('click', () => {
+    progressEl.textContent = 'Running heuristic search…';
+    // Run heuristic solver with good parameters
+    const result = heuristicSolve(state.roads, state.coveredMask, {beam: 40, restarts: 8, lookahead: 5});
+    state.roads = result.roads;
+    state.coveredMask = result.coveredMask;
+    render();
+    progressEl.textContent = `Heuristic search completed. Found ${result.houses} houses.`;
   });
 
   document.getElementById('solveExact').addEventListener('click', () => {
