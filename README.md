@@ -8,7 +8,7 @@ An interactive web application for solving the optimal road placement problem to
 
 Given a rectangular grid of W × H cells, the goal is to design a road layout that maximizes the number of houses that can be placed on the grid while minimizing road length.
 
-**Objective Function**: Maximize (houses - 0.2 × road length)
+**Objective Function**: Maximize houses count while minimizing road length (houses - 0.2 × road)
 
 **Constraints**:
 - **Road connectivity**: The road must form a single connected component (4-connected, no diagonals)
