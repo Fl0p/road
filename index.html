@@ -8,7 +8,7 @@
   :root {
     --cell: 44px;
     --gap: 5px;
-    --road: #0c0c0c;
+    --road: #2d3748;
     --house: #16a34a;
     --covered: #93c5fd22;
     --gridline: #33415566;
@@ -69,29 +69,24 @@
   .grid-wrap { background: linear-gradient(180deg, #0b1020, #050816); border:1px solid #172036; border-radius: 16px; padding: 16px; overflow:auto }
   .grid {
     display: grid;
-    gap: var(--gap);
+    gap: 0;
     justify-content: center;
   }
   .cell {
-    width: var(--cell); height: var(--cell); border-radius: 10px; background: #383b40;
-    border: 1px solid var(--gridline); position: relative; overflow: hidden; isolation: isolate;
-    cursor: pointer; transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    width: var(--cell); height: var(--cell); border-radius: 0; background: #383b40;
+    position: relative; overflow: hidden; isolation: isolate;
+    cursor: pointer; transition: box-shadow 0.2s ease;
   }
-  .cell:hover {
-    border-color: var(--accent);
-    box-shadow: 0 0 8px rgba(96, 165, 250, 0.3);
+
+  .cell.clickable-add:hover {
+    box-shadow: inset 0 0 15px rgba(255, 255, 255, 0.9);
   }
-  .cell.clickable-add {
-    border-color: #10b981;
-    box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+  .cell.clickable-remove:hover {
+    box-shadow: inset 0 0 10px rgba(239, 68, 68, 0.8);
   }
-  .cell.clickable-remove {
-    border-color: #f59e0b;
-    box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
-  }
-  .cell .coord { position:absolute;inset:0;display:grid;place-items:center;color:#7386a7;font-size:11px;user-select:none }
-  .cell.road { background: var(--road); border-color:#475569; box-shadow: inset 0 0 0 2px #0ea5a89c }
-  .cell.house { background: radial-gradient(120% 120% at 20% 10%, #16a34a, #065f46); border-color:#34d399; box-shadow: inset 0 0 0 2px #34d39955, 0 6px 16px rgba(16,185,129,.25) }
+  .cell .coord { display:none }
+  .cell.road { background: var(--road) }
+  .cell.house { background: radial-gradient(120% 120% at 20% 10%, #16a34a, #065f46) }
   .cell .covered { position:absolute; inset:0; background: var(--covered); pointer-events:none; opacity:0; transition: opacity .15s ease }
   .cell.covered-on .covered { opacity: 1 }
   .stats { display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:10px }
