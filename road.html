@@ -45,6 +45,17 @@
   }
   button:hover { border-color: #60a5faaa; box-shadow: 0 12px 24px rgba(2,8,23,.35), inset 0 1px 0 0 rgba(255,255,255,.06) }
   button:active { transform: translateY(1px) }
+  button:disabled { 
+    opacity: 0.5; 
+    cursor: not-allowed; 
+    background: linear-gradient(180deg, #374151, #1f2937); 
+    border-color: #4b5563; 
+  }
+  button:disabled:hover { 
+    border-color: #4b5563; 
+    box-shadow: 0 10px 20px rgba(2,8,23,.25), inset 0 0 0 0 rgba(255,255,255,.05); 
+    transform: none; 
+  }
   .primary { background: linear-gradient(180deg, #2563eb, #1d4ed8); border-color:#3b82f6 }
   .danger { background: linear-gradient(180deg, #b91c1c, #7f1d1d); border-color:#ef4444 }
   .muted { opacity:.85 }
@@ -106,6 +117,7 @@
         <button id="resize">Reset</button>
         <span class="sep"></span>
         <button id="solveHeuristic" class="primary">Heuristic Solve</button>
+        <button id="stopHeuristic" class="danger">Stop</button>
         <button id="solveExact" class="primary">Solve Optimally</button>
         <button id="stopExact" class="danger">Stop</button>
       </div>
@@ -319,10 +331,244 @@
     return { roads: best.roads, coveredMask: best.covered, houses: bestH };
   }
 
+  // ========= Web Workers =========
+  let exactWorker = null;
+  let heuristicWorker = null;
+
+  // ========= Solver State Management =========
+  function setSolverButtons(heuristicRunning, exactRunning) {
+    // Disable/enable solve buttons based on running state
+    document.getElementById('solveHeuristic').disabled = heuristicRunning || exactRunning;
+    document.getElementById('solveExact').disabled = heuristicRunning || exactRunning;
+    
+    // Enable/disable stop buttons based on running state
+    document.getElementById('stopHeuristic').disabled = !heuristicRunning;
+    document.getElementById('stopExact').disabled = !exactRunning;
+  }
+
+  // ========= Heuristic solver (Web Worker) =========
+  function startHeuristicSolver(roads0, covered0, opts = {beam: 40, restarts: 8, lookahead: 5}) {
+    stopHeuristicSolver(); // ensure single worker
+    setSolverButtons(true, false); // heuristic running
+    const code = `
+      let W, H, N, allNeigh;
+      const bit = i => (1n << BigInt(i));
+      const has = (B,i) => (B & bit(i)) !== 0n;
+      const add = (B,i) => (B | bit(i));
+      const popcnt = (B) => {
+        let x=B, c=0; while (x) { x &= (x-1n); c++; } return c;
+      };
+      const rc = (i)=> [Math.floor(i/W), i%W];
+
+      function frontier(roads) {
+        let F = 0n;
+        for (let i=0;i<N;i++) if (has(roads,i)) {
+          const ns = allNeigh[i];
+          for (let k=0;k<ns.length;k++) {
+            const v = ns[k];
+            if (!has(roads, v)) F |= bit(v);
+          }
+        }
+        return F;
+      }
+      function kGain(cell, coveredMask) {
+        const ns = allNeigh[cell];
+        let k=0;
+        for (let t=0;t<ns.length;t++) if ((coveredMask & bit(ns[t]))===0n) k++;
+        return k-1;
+      }
+      function applyAdd(roads, coveredMask, cell) {
+        let newRoads = add(roads, cell);
+        let newCovered = coveredMask;
+        const ns = allNeigh[cell];
+        for (let t=0;t<ns.length;t++) newCovered |= bit(ns[t]);
+        return [newRoads, newCovered];
+      }
+
+      let cancelled = false;
+      onmessage = (e)=>{
+        const msg = e.data;
+        if (msg?.cmd === 'cancel') { cancelled = true; return; }
+        if (msg?.cmd === 'solve') {
+          cancelled = false;
+          W=msg.W; H=msg.H; N=W*H; allNeigh = msg.allNeigh;
+          const { beam, restarts, lookahead } = msg.opts;
+          
+          let roads0 = BigInt(msg.roads);
+          let covered0 = BigInt(msg.covered);
+          let best = { roads: roads0, covered: covered0 };
+          let bestH = popcnt((covered0 & ~roads0));
+          function houses(roads, covered){ return popcnt((covered & ~roads)); }
+
+          function lookaheadOnce(roads, covered, depth) {
+            if (depth===0) return {gain:0, path:[]};
+            const base = houses(roads, covered);
+            const F = frontier(roads);
+            if (F===0n) return {gain:0, path:[]};
+            const center = [Math.floor(H/2), Math.floor(W/2)];
+            const cand = [];
+            for (let i=0;i<N;i++) if ((F & bit(i))!==0n) {
+              const delta = kGain(i, covered);
+              const [r,c] = rc(i); const d = Math.abs(r-center[0])+Math.abs(c-center[1]);
+              cand.push({i, delta, d});
+            }
+            cand.sort((a,b)=> (b.delta - a.delta) || (a.d - b.d));
+            const lim = Math.min(8, cand.length);
+            let bestLocal = {gain:-1e9, path:[]};
+            for (let j=0;j<lim;j++) {
+              const v = cand[j].i;
+              const [nr,nc] = applyAdd(roads, covered, v);
+              const g0 = houses(nr,nc) - base;
+              const sub = lookaheadOnce(nr,nc, depth-1);
+              const total = g0 + sub.gain;
+              if (total > bestLocal.gain) bestLocal = {gain: total, path: [v, ...sub.path]};
+            }
+            if (bestLocal.gain<=0) return {gain:0, path:[]};
+            return bestLocal;
+          }
+
+          const start = Date.now();
+          let lastPing = start;
+
+          for (let rep=0; rep<restarts && !cancelled; rep++) {
+            postMessage({type:'progress', rep, restarts, bestH});
+            
+            let beamStates = [{roads: roads0, covered: covered0}];
+            let improved = true;
+            while (improved && !cancelled) {
+              improved = false;
+              const pool = [];
+              for (const st of beamStates) {
+                const F = frontier(st.roads);
+                if (F===0n) continue;
+                const candidates = [];
+                for (let i=0;i<N;i++) if ((F & bit(i))!==0n) {
+                  const delta = kGain(i, st.covered);
+                  candidates.push({i, delta});
+                }
+                candidates.sort((a,b)=> b.delta - a.delta);
+                const keep = Math.min(12, candidates.length);
+                for (let j=0;j<keep;j++) {
+                  const {i, delta} = candidates[j];
+                  const [nr, nc] = applyAdd(st.roads, st.covered, i);
+                  const h = houses(nr, nc);
+                  pool.push({roads: nr, covered: nc, score: h*10 + delta});
+                }
+                if (keep===0 || candidates[0].delta <= 0) {
+                  let extra = 0, tries = 0;
+                  while (extra < 4 && tries < 20 && candidates.length) {
+                    const p = candidates[Math.floor(Math.random()*candidates.length)].i;
+                    const [nr, nc] = applyAdd(st.roads, st.covered, p);
+                    const h = houses(nr, nc);
+                    pool.push({roads: nr, covered: nc, score: h*10 - 5});
+                    extra++; tries++;
+                  }
+                }
+              }
+              if (pool.length===0) break;
+              pool.sort((a,b)=> b.score - a.score);
+              const next = [];
+              const seen = new Set();
+              for (const p of pool) {
+                const key = p.roads.toString();
+                if (seen.has(key)) continue;
+                seen.add(key);
+                next.push({roads:p.roads, covered:p.covered});
+                if (next.length >= beam) break;
+              }
+              beamStates = next;
+              const refined = [];
+              for (const st of beamStates) {
+                const plan = lookaheadOnce(st.roads, st.covered, lookahead);
+                let roads = st.roads, covered = st.covered;
+                if (plan.path.length) {
+                  for (const step of plan.path) {
+                    [roads, covered] = applyAdd(roads, covered, step);
+                  }
+                }
+                refined.push({roads, covered});
+              }
+              for (const st of refined) {
+                const h = houses(st.roads, st.covered);
+                if (h > bestH) { 
+                  bestH = h; 
+                  best = st; 
+                  improved = true; 
+                  postMessage({type:'improvement', bestH, bestRoads: best.roads.toString(), bestCovered: best.covered.toString()});
+                }
+              }
+              beamStates = refined;
+
+              const now = Date.now();
+              if (now - lastPing > 300) {
+                postMessage({type:'progress', rep, restarts, bestH});
+                lastPing = now;
+              }
+            }
+          }
+
+          if (cancelled) {
+            postMessage({type:'cancelled', bestH, bestRoads: best.roads.toString(), bestCovered: best.covered.toString()});
+          } else {
+            postMessage({type:'done', bestH, bestRoads: best.roads.toString(), bestCovered: best.covered.toString(), ms: Date.now()-start});
+          }
+        }
+      };
+    `;
+    const blob = new Blob([code], {type: 'application/javascript'});
+    const url = URL.createObjectURL(blob);
+    heuristicWorker = new Worker(url);
+
+    heuristicWorker.onmessage = (e) => {
+      const data = e.data;
+      if (data.type === 'progress') {
+        progressEl.textContent = `Heuristic search… restart ${data.rep + 1}/${data.restarts}, best: ${data.bestH}`;
+      } else if (data.type === 'improvement') {
+        progressEl.textContent = `Heuristic search… found better result: ${data.bestH}`;
+        tryUpdateFromHeuristicWorker(data.bestRoads, data.bestCovered);
+      } else if (data.type === 'done') {
+        progressEl.textContent = `Heuristic completed in ${data.ms} ms. Found ${data.bestH} houses.`;
+        tryUpdateFromHeuristicWorker(data.bestRoads, data.bestCovered, true);
+        URL.revokeObjectURL(url);
+        setSolverButtons(false, false); // no solvers running
+      } else if (data.type === 'cancelled') {
+        progressEl.textContent = `Heuristic stopped. Best found: ${data.bestH} houses.`;
+        tryUpdateFromHeuristicWorker(data.bestRoads, data.bestCovered);
+        URL.revokeObjectURL(url);
+        setSolverButtons(false, false); // no solvers running
+      }
+    };
+
+    const payload = {
+      cmd: 'solve',
+      W, H, allNeigh,
+      roads: roads0.toString(),
+      covered: covered0.toString(),
+      opts
+    };
+    heuristicWorker.postMessage(payload);
+  }
+
+  function stopHeuristicSolver() {
+    if (heuristicWorker) { 
+      heuristicWorker.postMessage({cmd:'cancel'}); 
+      heuristicWorker.terminate(); 
+      heuristicWorker = null; 
+    }
+    setSolverButtons(false, false); // no solvers running
+  }
+
+  function tryUpdateFromHeuristicWorker(roadsStr, coveredStr, final=false) {
+    const roads = BigInt(roadsStr), covered = BigInt(coveredStr);
+    state.roads = roads; 
+    state.coveredMask = covered;
+    render();
+  }
+
   // ========= Exact solver (Web Worker) =========
-  let worker = null;
   function startExactSolver(roads0, covered0) {
     stopExactSolver(); // ensure single worker
+    setSolverButtons(false, true); // exact running
     const code = `
       let W, H, N, allNeigh;
       const bit = i => (1n << BigInt(i));
@@ -351,6 +597,28 @@
         let k=0;
         for (let t=0;t<ns.length;t++) if ((coveredMask & bit(ns[t]))===0n) k++;
         return k-1;
+      }
+      function has2x2Block(roads, newCell) {
+        const [r, c] = rc(newCell);
+        // Check all possible 2x2 squares that include this cell
+        for (let dr = 0; dr <= 1; dr++) {
+          for (let dc = 0; dc <= 1; dc++) {
+            const tr = r - dr, tc = c - dc;
+            if (tr >= 0 && tc >= 0 && tr + 1 < H && tc + 1 < W) {
+              // Check if all 4 cells in this 2x2 square would be roads
+              const cells = [
+                tr * W + tc, tr * W + (tc + 1),
+                (tr + 1) * W + tc, (tr + 1) * W + (tc + 1)
+              ];
+              let roadCount = 0;
+              for (const cellId of cells) {
+                if (has(roads, cellId) || cellId === newCell) roadCount++;
+              }
+              if (roadCount === 4) return true;
+            }
+          }
+        }
+        return false;
       }
       function applyAdd(roads, coveredMask, cell) {
         let newRoads = add(roads, cell);
@@ -456,6 +724,8 @@
             // push children
             for (let j=0;j<cand.length;j++) {
               const v = cand[j];
+              // Skip if adding this cell would create a 2x2 block of roads
+              if (has2x2Block(node.roads, v)) continue;
               const [nr, nc] = applyAdd(node.roads, node.covered, v);
               stack.push({roads: nr, covered: nc});
             }
@@ -477,9 +747,9 @@
     `;
     const blob = new Blob([code], {type: 'application/javascript'});
     const url = URL.createObjectURL(blob);
-    worker = new Worker(url);
+    exactWorker = new Worker(url);
 
-    worker.onmessage = (e) => {
+    exactWorker.onmessage = (e) => {
       const data = e.data;
       if (data.type === 'progress') {
         progressEl.textContent = `Searching… nodes: ${data.nodes}, best result: ${data.bestH}`;
@@ -490,11 +760,13 @@
         nodesEl.textContent = data.nodes;
         tryUpdateFromWorker(data.bestRoads, data.bestCovered, true);
         URL.revokeObjectURL(url);
+        setSolverButtons(false, false); // no solvers running
       } else if (data.type === 'cancelled') {
         progressEl.textContent = `Stopped. Best found result: ${data.bestH}, explored nodes: ${data.nodes}`;
         nodesEl.textContent = data.nodes;
         tryUpdateFromWorker(data.bestRoads, data.bestCovered);
         URL.revokeObjectURL(url);
+        setSolverButtons(false, false); // no solvers running
       }
     };
 
@@ -506,10 +778,11 @@
       covered: state.coveredMask.toString(),
       seedH: popcnt((state.coveredMask & ~state.roads)),
     };
-    worker.postMessage(payload);
+    exactWorker.postMessage(payload);
   }
   function stopExactSolver() {
-    if (worker) { worker.postMessage({cmd:'cancel'}); worker.terminate(); worker = null; }
+    if (exactWorker) { exactWorker.postMessage({cmd:'cancel'}); exactWorker.terminate(); exactWorker = null; }
+    setSolverButtons(false, false); // no solvers running
   }
   function tryUpdateFromWorker(roadsStr, coveredStr, final=false) {
     // Update board from worker’s best
@@ -564,6 +837,8 @@
     render();
     progressEl.textContent = 'Ready.';
     nodesEl.textContent = '0';
+    // Initially no solvers running
+    setSolverButtons(false, false);
   }
   function render() {
     const housesMask = state.coveredMask & ~state.roads;
@@ -677,6 +952,10 @@
 
   // ========= Wire controls =========
   document.getElementById('resize').addEventListener('click', () => {
+    // Stop any running solvers before reset
+    stopHeuristicSolver();
+    stopExactSolver();
+    
     const nw = Math.max(2, Math.min(15, +document.getElementById('w').value|0));
     const nh = Math.max(2, Math.min(15, +document.getElementById('h').value|0));
     W = nw; H = nh;
@@ -686,22 +965,16 @@
   });
 
   document.getElementById('solveHeuristic').addEventListener('click', () => {
-    progressEl.textContent = 'Running heuristic search…';
-    // Run heuristic solver with good parameters
-    const result = heuristicSolve(state.roads, state.coveredMask, {beam: 40, restarts: 8, lookahead: 5});
-    state.roads = result.roads;
-    state.coveredMask = result.coveredMask;
-    render();
-    progressEl.textContent = `Heuristic search completed. Found ${result.houses} houses.`;
+    progressEl.textContent = 'Starting heuristic search…';
+    startHeuristicSolver(state.roads, state.coveredMask, {beam: 40, restarts: 8, lookahead: 5});
+  });
+
+  document.getElementById('stopHeuristic').addEventListener('click', () => {
+    stopHeuristicSolver();
   });
 
   document.getElementById('solveExact').addEventListener('click', () => {
     progressEl.textContent = 'Starting optimal search…';
-    // seed from heuristic for strong pruning
-    const seed = heuristicSolve(state.roads, state.coveredMask, {beam: 30, restarts: 4, lookahead: 4});
-    state.roads = seed.roads;
-    state.coveredMask = seed.coveredMask;
-    render();
     startExactSolver(state.roads, state.coveredMask);
   });
   document.getElementById('stopExact').addEventListener('click', () => {
