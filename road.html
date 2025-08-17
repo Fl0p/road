@@ -64,6 +64,19 @@
   .cell {
     width: var(--cell); height: var(--cell); border-radius: 10px; background: #383b40;
     border: 1px solid var(--gridline); position: relative; overflow: hidden; isolation: isolate;
+    cursor: pointer; transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .cell:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 8px rgba(96, 165, 250, 0.3);
+  }
+  .cell.clickable-add {
+    border-color: #10b981;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+  }
+  .cell.clickable-remove {
+    border-color: #f59e0b;
+    box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
   }
   .cell .coord { position:absolute;inset:0;display:grid;place-items:center;color:#7386a7;font-size:11px;user-select:none }
   .cell.road { background: var(--road); border-color:#475569; box-shadow: inset 0 0 0 2px #0ea5a89c }
@@ -90,7 +103,7 @@
       <div class="controls">
         <label>Width <input id="w" type="number" min="2" max="15" value="7"></label>
         <label>Height <input id="h" type="number" min="2" max="15" value="7"></label>
-        <button id="resize">Build Field</button>
+        <button id="resize">Reset</button>
         <span class="sep"></span>
         <button id="solveExact" class="primary">Solve Optimally</button>
         <button id="stopExact" class="danger">Stop</button>
@@ -101,8 +114,8 @@
         <br>
         <b>The goal is to build a road shape that maximizes the count of such house cells.</b>
         <br>
-        This tool lets you build the road manually
-        (click frontier cells) or compute an optimal solution. Coverage (cells at distance 1 from the road) is always shown.
+        <b>Manual drawing:</b> Click adjacent empty cells to extend the road, or click road cells to remove them (if it doesn't break connectivity).
+        This tool lets you build the road manually or compute an optimal solution. Coverage (cells at distance 1 from the road) is always shown.
       </div>
     </div>
 
@@ -531,6 +544,10 @@
         const ov = document.createElement('div');
         ov.className = 'covered';
         el.append(coord, ov);
+        
+        // Add click handler for manual road drawing
+        el.addEventListener('click', () => handleCellClick(r, c));
+        
         gridEl.appendChild(el);
         cells.push(el);
       }
@@ -551,9 +568,18 @@
     const housesMask = state.coveredMask & ~state.roads;
     for (let i=0;i<N;i++) {
       const el = cells[i];
-      el.classList.toggle('road', has(state.roads,i));
-      el.classList.toggle('house', (!has(state.roads,i) && (housesMask & bit(i))!==0n));
+      const [r, c] = rc(i);
+      const isRoad = has(state.roads, i);
+      const isAdjacent = isAdjacentToRoad(r, c);
+      const canRemove = isRoad && !wouldDisconnectRoad(i);
+      
+      el.classList.toggle('road', isRoad);
+      el.classList.toggle('house', (!isRoad && (housesMask & bit(i))!==0n));
       el.classList.toggle('covered-on', ((state.coveredMask & bit(i))!==0n));
+      
+      // Visual hints for clickable cells
+      el.classList.toggle('clickable-add', !isRoad && isAdjacent);
+      el.classList.toggle('clickable-remove', canRemove);
     }
     const houses = popcnt(housesMask);
     const roadLen = popcnt(state.roads);
@@ -561,6 +587,91 @@
     housesEl.textContent = houses;
     roadEl.textContent = roadLen;
     coverEl.textContent = Math.round(coveredCount * 100 / N) + '%';
+  }
+
+  // Check if a cell is adjacent to existing road (4-connected)
+  function isAdjacentToRoad(r, c) {
+    const cellIndex = id(r, c);
+    const neighbors = allNeigh[cellIndex];
+    for (const neighbor of neighbors) {
+      if (has(state.roads, neighbor)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Check if removing a road cell would disconnect the road
+  function wouldDisconnectRoad(cellIndex) {
+    if (!has(state.roads, cellIndex)) return false;
+    
+    // If it's the only road cell, removing it would disconnect
+    if (popcnt(state.roads) === 1) return true;
+    
+    // Create temporary road without this cell
+    const tempRoads = state.roads & ~bit(cellIndex);
+    
+    // Check if remaining road is connected using BFS
+    let visitedMask = 0n;
+    const queue = [];
+    
+    // Find first remaining road cell as starting point
+    let startCell = -1;
+    for (let i = 0; i < N; i++) {
+      if (has(tempRoads, i)) {
+        startCell = i;
+        break;
+      }
+    }
+    
+    if (startCell === -1) return true; // No remaining road cells
+    
+    queue.push(startCell);
+    visitedMask = add(visitedMask, startCell);
+    
+    while (queue.length > 0) {
+      const current = queue.shift();
+      const neighbors = allNeigh[current];
+      
+      for (const neighbor of neighbors) {
+        if (has(tempRoads, neighbor) && !has(visitedMask, neighbor)) {
+          visitedMask = add(visitedMask, neighbor);
+          queue.push(neighbor);
+        }
+      }
+    }
+    
+    // If not all road cells were visited, the road would be disconnected
+    return visitedMask !== tempRoads;
+  }
+
+  function handleCellClick(r, c) {
+    const cellIndex = id(r, c);
+    const isRoad = has(state.roads, cellIndex);
+    
+    if (isRoad) {
+      // Try to remove road cell if it doesn't disconnect the road
+      if (!wouldDisconnectRoad(cellIndex)) {
+        state.roads = state.roads & ~bit(cellIndex);
+        const result = computeCovered(state.roads);
+        state.coveredMask = result.coveredMask;
+        render();
+        progressEl.textContent = 'Road cell removed manually.';
+      } else {
+        progressEl.textContent = 'Cannot remove: would disconnect road.';
+      }
+    } else {
+      // Try to add road cell if adjacent to existing road
+      if (isAdjacentToRoad(r, c)) {
+        state.roads = add(state.roads, cellIndex);
+        const result = computeCovered(state.roads);
+        state.coveredMask = result.coveredMask;
+        render();
+        progressEl.textContent = 'Road cell added manually.';
+      } else {
+        progressEl.textContent = 'Can only add road to adjacent cells.';
+      }
+    }
   }
 
   // ========= Wire controls =========
