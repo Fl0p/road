@@ -1,4 +1,4 @@
-# Maximum Houses Near Road - Interactive Grid Tool
+# Maximum Houses Near Road - Parametrizable Field
 
 An interactive web application for solving the optimal road placement problem to maximize the number of houses that can be built adjacent to the road.
 
@@ -25,17 +25,18 @@ Given a rectangular grid of W × H cells, the goal is to design a road layout th
 - **Click to extend**: Click on empty cells adjacent to existing road to extend the road
 - **Click to remove**: Click on road cells to remove them (only if it doesn't break road connectivity)
 - **Visual hints**: 
-  - Green glow indicates cells where road can be added
-  - Orange glow indicates road cells that can be removed
-  - Blue glow on hover for all interactive cells
+  - White glow on hover indicates cells where road can be added
+  - Red glow on hover indicates road cells that can be removed
+  - Visual feedback shows covered areas in real-time
 - **Coverage visualization**: Real-time display of cells that would be covered by houses
 
 ### Automatic Optimization
 - **Heuristic solver**: Fast beam search with lookahead and multiple restarts for good solutions
 - **Exact solver**: DFS-based Branch-and-bound algorithm with memoization to find provably optimal solutions
-- **Real-time progress**: Shows search progress, nodes explored, and current best solution
+- **Real-time progress**: Shows search progress, nodes explored, and current best weighted objective
 - **Weighted objective**: Optimizes houses - 0.2 × road length for balanced solutions
 - **Web Workers**: Non-blocking computation keeps UI responsive during optimization
+- **Solver controls**: Independent start/stop controls for each solver type
 
 ### Interactive Interface
 - **Adjustable grid size**: 2×2 to 15×15 grids
@@ -43,9 +44,8 @@ Given a rectangular grid of W × H cells, the goal is to design a road layout th
   - Number of houses
   - Road length
   - Cell coverage percentage
-  - Search nodes explored
-  - Weighted objective value
-- **Visual feedback**: Real-time updates of covered areas and house placements
+- **Progress tracking**: Shows search progress, nodes explored, and current best weighted objective (houses - 0.2 × road length)
+- **Visual feedback**: Real-time updates of covered areas and house placements with road sprites
 - **Modern UI**: Dark theme with smooth animations and visual indicators
 
 ## How to Use
@@ -56,6 +56,14 @@ Given a rectangular grid of W × H cells, the goal is to design a road layout th
 4. **Exact solving**: Use "Solve Exactly" for guaranteed optimal solutions (may take longer on larger grids)
 5. **Stop solving**: Use "Stop" buttons to cancel running solvers
 6. **Reset**: Clear the grid and start over with the current dimensions
+
+## Visual Elements
+
+- **Roads**: Displayed in green with detailed SVG road sprites showing curves, intersections, and dead ends
+- **Houses**: Displayed as green cells with house emoji (🏠) next to roads  
+- **Empty cells**: Light gray background
+- **Covered areas**: Light blue overlay showing potential house placement areas
+- **Interactive hints**: White glow for addable cells, red glow for removable road cells
 
 ## Technical Details
 
@@ -69,17 +77,11 @@ Given a rectangular grid of W × H cells, the goal is to design a road layout th
 ## File Structure
 
 - `index.html` - Complete standalone application (HTML + CSS + JavaScript)
+- `road.png` - Example screenshot
+- `README.md` - This documentation file
 
 ## Running the Application
 
 Simply open `index.html` in any modern web browser. No additional dependencies or server setup required.
 
 Alternatively, visit the [online demo](https://fl0p.github.io/road/).
-
-## Example Use Cases
-
-- **Educational**: Understanding graph connectivity and optimization problems
-- **Research**: Testing different road layout strategies and optimization approaches
-- **Game design**: Prototype for city-building or puzzle game mechanics
-- **Algorithm comparison**: Benchmarking heuristic vs exact solution methods
-- **Competitive programming**: Practice with graph algorithms and state space search
