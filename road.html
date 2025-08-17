@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Maximum Houses Near Road — Parametrizable Field</title>
+<style>
+  :root {
+    --cell: 44px;
+    --gap: 5px;
+    --road: #0c0c0c;
+    --house: #16a34a;
+    --covered: #93c5fd22;
+    --gridline: #33415566;
+    --bg: #0b1020;
+    --card: #0f172a;
+    --text: #e5e7eb;
+    --muted: #94a3b8;
+    --accent: #60a5fa;
+  }
+  * { box-sizing: border-box }
+  body {
+    margin: 0; background: radial-gradient(1200px 700px at 20% -20%, #172554 0%, #0b1020 60%, #050816 100%);
+    color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans";
+    min-height: 100vh; display: grid; place-items: start center; padding: 20px;
+  }
+  .app { width: min(1100px, 96vw); display: grid; gap: 14px }
+  .panel {
+    background: linear-gradient(180deg, #0a1220, #060d1a);
+    border: 1px solid #172036; border-radius: 16px; padding: 14px;
+    box-shadow: 0 14px 28px rgba(2,8,23,.35), inset 0 1px 0 rgba(255,255,255,.03);
+  }
+  .header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between }
+  .title { font-weight: 800; letter-spacing:.2px; display:flex; align-items:center; gap:10px }
+  .title .dot { width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent)}
+  .controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center }
+  label { font-size: 14px; color: var(--muted) }
+  input[type="number"] { width: 64px; padding: 8px; border-radius: 10px; border:1px solid #1f2b44; background:#0b1324; color:var(--text) }
+  button {
+    background: linear-gradient(180deg, #1f2937, #0b1324);
+    color: var(--text); border: 1px solid #334155; padding: 10px 14px; border-radius: 12px;
+    font-weight: 700; letter-spacing: .2px; cursor: pointer;
+    transition: transform .05s ease, box-shadow .2s ease, border-color .2s ease;
+    box-shadow: 0 10px 20px rgba(2,8,23,.25), inset 0 0 0 0 rgba(255,255,255,.05);
+  }
+  button:hover { border-color: #60a5faaa; box-shadow: 0 12px 24px rgba(2,8,23,.35), inset 0 1px 0 0 rgba(255,255,255,.06) }
+  button:active { transform: translateY(1px) }
+  .primary { background: linear-gradient(180deg, #2563eb, #1d4ed8); border-color:#3b82f6 }
+  .danger { background: linear-gradient(180deg, #b91c1c, #7f1d1d); border-color:#ef4444 }
+  .muted { opacity:.85 }
+  .legend { display:flex; gap:14px; align-items:center; color:var(--muted); font-size:14px }
+  .dotbox { display:inline-flex; gap:6px; align-items:center }
+  .dotbox .dot { width:12px; height:12px; border-radius:4px; outline:1px solid #3a4a66 }
+  .dot-road { background: var(--road) }
+  .dot-house { background: #16a34a }
+  .dot-free { background: #383b40 }
+  .wrap { display:grid; gap: 12px }
+  .grid-wrap { background: linear-gradient(180deg, #0b1020, #050816); border:1px solid #172036; border-radius: 16px; padding: 16px; overflow:auto }
+  .grid {
+    display: grid;
+    gap: var(--gap);
+    justify-content: center;
+  }
+  .cell {
+    width: var(--cell); height: var(--cell); border-radius: 10px; background: #383b40;
+    border: 1px solid var(--gridline); position: relative; overflow: hidden; isolation: isolate;
+  }
+  .cell .coord { position:absolute;inset:0;display:grid;place-items:center;color:#7386a7;font-size:11px;user-select:none }
+  .cell.road { background: var(--road); border-color:#475569; box-shadow: inset 0 0 0 2px #0ea5a89c }
+  .cell.house { background: radial-gradient(120% 120% at 20% 10%, #16a34a, #065f46); border-color:#34d399; box-shadow: inset 0 0 0 2px #34d39955, 0 6px 16px rgba(16,185,129,.25) }
+  .cell .covered { position:absolute; inset:0; background: var(--covered); pointer-events:none; opacity:0; transition: opacity .15s ease }
+  .cell.covered-on .covered { opacity: 1 }
+  .stats { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:10px }
+  .stat { background: linear-gradient(180deg, #0a1220, #060d1a); border:1px solid #172036; border-radius: 14px; padding: 10px 12px; text-align:center }
+  .stat .n { font-size:22px; font-weight:800; color:#f8fafc }
+  .stat .t { font-size:12px; color:var(--muted); margin-top:4px; letter-spacing:.2px }
+  .footnote { color:var(--muted); font-size:13px; text-align:center; margin-top: 4px }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap }
+  .progress { color:var(--muted); font-size:13px }
+  .sep { width:1px; height:20px; background:#23304a; margin:0 6px }
+  .desc { color:var(--muted); font-size:14px; line-height:1.5; margin-top:12px }
+  .desc em { color:var(--text); font-style:italic }
+  .desc code { background:#1a2332; color:#94d3a2; padding:2px 6px; border-radius:4px; font-family:ui-monospace,monospace }
+</style>
+</head>
+<body>
+  <div class="app">
+    <div class="panel header">
+      <div class="title"><span class="dot"></span>Maximum Houses Near Road</div>
+      <div class="controls">
+        <label>Width <input id="w" type="number" min="2" max="15" value="7"></label>
+        <label>Height <input id="h" type="number" min="2" max="15" value="7"></label>
+        <button id="resize">Build Field</button>
+        <span class="sep"></span>
+        <button id="solveExact" class="primary">Solve Optimally</button>
+        <button id="stopExact" class="danger">Stop</button>
+      </div>
+      <div class="desc">
+        Grid <em>W × H</em>, starting road cell is <code>(0,0)</code>. You can extend the road up/down/left/right only (no diagonals) and the road must remain 4-connected.
+        A house can be placed in any cell that shares a side with at least one road cell (no diagonals), and houses cannot overlap road.
+        <br>
+        <b>The goal is to build a road shape that maximizes the count of such house cells.</b>
+        <br>
+        This tool lets you build the road manually
+        (click frontier cells) or compute an optimal solution. Coverage (cells at distance 1 from the road) is always shown.
+      </div>
+    </div>
+
+    <div class="panel wrap">
+      <div class="legend">
+        <span class="dotbox"><span class="dot dot-road"></span> road</span>
+        <span class="dotbox"><span class="dot dot-house"></span> house</span>
+        <span class="dotbox"><span class="dot dot-free"></span> empty</span>
+        <span class="sep"></span>
+        <span class="progress" id="progress">Ready.</span>
+      </div>
+      <div class="grid-wrap">
+        <div id="grid" class="grid"></div>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="n" id="housesCount">0</div><div class="t">houses</div></div>
+        <div class="stat"><div class="n" id="roadLen">0</div><div class="t">road length</div></div>
+        <div class="stat"><div class="n" id="coverPct">0%</div><div class="t">cell coverage</div></div>
+        <div class="stat"><div class="n" id="nodes">0</div><div class="t">states explored</div></div>
+      </div>
+      <div class="footnote">
+        Start at (0,0). Road is connected (4-neighborhood). House in cell adjacent to road.
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // ========= Utility / Bitset =========
+  const bit = i => (1n << BigInt(i));
+  const has = (B,i) => (B & bit(i)) !== 0n;
+  const add = (B,i) => (B | bit(i));
+  const popcnt = (B) => {
+    let x=B, c=0; while (x) { x &= (x-1n); c++; } return c;
+  };
+
+  // ========= State (dynamic by size) =========
+  let W = 7, H = 7, N = W*H;
+  let allNeigh = [];
+  let id = (r,c)=> r*W + c;
+  let rc = (i)=> [Math.floor(i/W), i%W];
+  const inside = (r,c)=> r>=0 && c>=0 && r<H && c<W;
+
+  function buildNeigh() {
+    N = W*H;
+    id = (r,c)=> r*W + c;
+    rc = (i)=> [Math.floor(i/W), i%W];
+    allNeigh = Array.from({length:N}, (_,i)=>{
+      const [r,c] = rc(i);
+      const ns = [];
+      if (inside(r-1,c)) ns.push(id(r-1,c));
+      if (inside(r+1,c)) ns.push(id(r+1,c));
+      if (inside(r,c-1)) ns.push(id(r,c-1));
+      if (inside(r,c+1)) ns.push(id(r,c+1));
+      return ns;
+    });
+  }
+
+  // ========= Core helpers =========
+  function computeCovered(roads) {
+    let coveredMask = 0n;
+    for (let i=0;i<N;i++) if (has(roads,i)) {
+      const ns = allNeigh[i];
+      for (let k=0;k<ns.length;k++) coveredMask |= bit(ns[k]);
+    }
+    const housesMask = coveredMask & ~roads;
+    return { coveredMask, housesMask };
+  }
+  function frontier(roads) {
+    let F = 0n;
+    for (let i=0;i<N;i++) if (has(roads,i)) {
+      const ns = allNeigh[i];
+      for (let k=0;k<ns.length;k++) {
+        const v = ns[k];
+        if (!has(roads, v)) F |= bit(v);
+      }
+    }
+    return F;
+  }
+  function kGain(cell, coveredMask) {
+    // New houses (upper-bounded) if we add road at `cell`: neighbors newly covered minus 1 (since frontier cell already covered)
+    const ns = allNeigh[cell];
+    let k=0;
+    for (let t=0;t<ns.length;t++) if ((coveredMask & bit(ns[t]))===0n) k++;
+    return k-1;
+  }
+  function applyAdd(roads, coveredMask, cell) {
+    let newRoads = add(roads, cell);
+    let newCovered = coveredMask;
+    const ns = allNeigh[cell];
+    for (let t=0;t<ns.length;t++) newCovered |= bit(ns[t]);
+    return [newRoads, newCovered];
+  }
+
+  // ========= Heuristic: Beam + Lookahead + Restarts =========
+  function heuristicSolve(roads0, covered0, opts={beam:40, restarts:8, lookahead:5}) {
+    const { beam, restarts, lookahead } = opts;
+    let best = { roads: roads0, covered: covered0 };
+    let bestH = popcnt((covered0 & ~roads0));
+    function houses(roads, covered){ return popcnt((covered & ~roads)); }
+
+    function lookaheadOnce(roads, covered, depth) {
+      if (depth===0) return {gain:0, path:[]};
+      const base = houses(roads, covered);
+      const F = frontier(roads);
+      if (F===0n) return {gain:0, path:[]};
+      // candidates sorted by delta desc and distance to center
+      const center = [Math.floor(H/2), Math.floor(W/2)];
+      const cand = [];
+      for (let i=0;i<N;i++) if ((F & bit(i))!==0n) {
+        const delta = kGain(i, covered);
+        const [r,c] = rc(i); const d = Math.abs(r-center[0])+Math.abs(c-center[1]);
+        cand.push({i, delta, d});
+      }
+      cand.sort((a,b)=> (b.delta - a.delta) || (a.d - b.d));
+      const lim = Math.min(8, cand.length);
+      let bestLocal = {gain:-1e9, path:[]};
+      for (let j=0;j<lim;j++) {
+        const v = cand[j].i;
+        const [nr,nc] = applyAdd(roads, covered, v);
+        const g0 = houses(nr,nc) - base;
+        const sub = lookaheadOnce(nr,nc, depth-1);
+        const total = g0 + sub.gain;
+        if (total > bestLocal.gain) bestLocal = {gain: total, path: [v, ...sub.path]};
+      }
+      if (bestLocal.gain<=0) return {gain:0, path:[]};
+      return bestLocal;
+    }
+
+    for (let rep=0; rep<restarts; rep++) {
+      let beamStates = [{roads: roads0, covered: covered0}];
+      let improved = true;
+      while (improved) {
+        improved = false;
+        // collect expansions
+        const pool = [];
+        for (const st of beamStates) {
+          const F = frontier(st.roads);
+          if (F===0n) continue;
+          const candidates = [];
+          for (let i=0;i<N;i++) if ((F & bit(i))!==0n) {
+            const delta = kGain(i, st.covered);
+            candidates.push({i, delta});
+          }
+          // keep top few + a bit of randomness
+          candidates.sort((a,b)=> b.delta - a.delta);
+          const keep = Math.min(12, candidates.length);
+          for (let j=0;j<keep;j++) {
+            const {i, delta} = candidates[j];
+            const [nr, nc] = applyAdd(st.roads, st.covered, i);
+            const h = houses(nr, nc);
+            pool.push({roads: nr, covered: nc, score: h*10 + delta}); // bias by delta to spread
+          }
+          // small random exploration if no positive delta
+          if (keep===0 || candidates[0].delta <= 0) {
+            let extra = 0, tries = 0;
+            while (extra < 4 && tries < 20 && candidates.length) {
+              const p = candidates[Math.floor(Math.random()*candidates.length)].i;
+              const [nr, nc] = applyAdd(st.roads, st.covered, p);
+              const h = houses(nr, nc);
+              pool.push({roads: nr, covered: nc, score: h*10 - 5});
+              extra++; tries++;
+            }
+          }
+        }
+        if (pool.length===0) break;
+        // Beam selection
+        pool.sort((a,b)=> b.score - a.score);
+        // dedup by roads mask string
+        const next = [];
+        const seen = new Set();
+        for (const p of pool) {
+          const key = p.roads.toString();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          next.push({roads:p.roads, covered:p.covered});
+          if (next.length >= beam) break;
+        }
+        beamStates = next;
+        // local lookahead to squeeze a bit
+        const refined = [];
+        for (const st of beamStates) {
+          const plan = lookaheadOnce(st.roads, st.covered, lookahead);
+          let roads = st.roads, covered = st.covered;
+          if (plan.path.length) {
+            for (const step of plan.path) {
+              [roads, covered] = applyAdd(roads, covered, step);
+            }
+          }
+          refined.push({roads, covered});
+        }
+        // evaluate and keep best
+        for (const st of refined) {
+          const h = houses(st.roads, st.covered);
+          if (h > bestH) { bestH = h; best = st; improved = true; }
+        }
+        beamStates = refined;
+      }
+    }
+    return { roads: best.roads, coveredMask: best.covered, houses: bestH };
+  }
+
+  // ========= Exact solver (Web Worker) =========
+  let worker = null;
+  function startExactSolver(roads0, covered0) {
+    stopExactSolver(); // ensure single worker
+    const code = `
+      let W, H, N, allNeigh;
+      const bit = i => (1n << BigInt(i));
+      const has = (B,i) => (B & bit(i)) !== 0n;
+      const add = (B,i) => (B | bit(i));
+      const popcnt = (B)=>{ let x=B,c=0; while(x){ x&=(x-1n); c++; } return c; };
+      const rc = (i)=> [Math.floor(i/W), i%W];
+      function computeCovered(roads) {
+        let coveredMask = 0n;
+        for (let i=0;i<N;i++) if (has(roads,i)) {
+          const ns = allNeigh[i];
+          for (let k=0;k<ns.length;k++) coveredMask |= bit(ns[k]);
+        }
+        return coveredMask;
+      }
+      function frontier(roads) {
+        let F = 0n;
+        for (let i=0;i<N;i++) if (has(roads,i)) {
+          const ns = allNeigh[i];
+          for (let k=0;k<ns.length;k++) { const v = ns[k]; if (!has(roads, v)) F |= bit(v); }
+        }
+        return F;
+      }
+      function kGain(cell, coveredMask) {
+        const ns = allNeigh[cell];
+        let k=0;
+        for (let t=0;t<ns.length;t++) if ((coveredMask & bit(ns[t]))===0n) k++;
+        return k-1;
+      }
+      function applyAdd(roads, coveredMask, cell) {
+        let newRoads = add(roads, cell);
+        let newCovered = coveredMask;
+        const ns = allNeigh[cell];
+        for (let t=0;t<ns.length;t++) newCovered |= bit(ns[t]);
+        return [newRoads, newCovered];
+      }
+      function houses(roads, covered){ return popcnt((covered & ~roads)); }
+
+      let cancelled = false;
+      onmessage = (e)=>{
+        const msg = e.data;
+        if (msg?.cmd === 'cancel') { cancelled = true; return; }
+        if (msg?.cmd === 'solve') {
+          cancelled = false;
+          W=msg.W; H=msg.H; N=W*H; allNeigh = msg.allNeigh;
+          let roads = BigInt(msg.roads);
+          let covered = BigInt(msg.covered);
+          let bestH = houses(roads, covered), bestRoads = roads, bestCovered = covered;
+          let nodes = 0;
+          const start = Date.now();
+          const Ntot = N;
+
+          // Seeded UB: trivial N - |R|, but good ordering + seed from heuristic
+          if (msg.seedH !== undefined && msg.seedH > bestH) bestH = msg.seedH;
+
+          const memo = new Map(); // roads -> best houses seen
+          const stack = [];
+          // initial candidates (symmetry break for square: first step only right)
+          let F0 = frontier(roads);
+          let cands0 = [];
+          for (let i=0;i<N;i++) if ((F0 & bit(i))!==0n) cands0.push(i);
+          if (W===H) { // symmetry cut (right preferred over down)
+            const right = (1); // (0,1)
+            const down  = (W); // (1,0)
+            cands0 = cands0.filter(i => i===right || i!==down);
+          }
+          // push root (no move yet) — we will expand from loop by generating children of current roads set
+          stack.push({roads, covered, iter: false, cands: cands0, index: 0});
+
+          function ub_trivial(roads) { return Ntot - popcnt(roads); }
+
+          function orderCands(roads, covered, list) {
+            // sort by delta desc, then closer to center
+            const center = [Math.floor(H/2), Math.floor(W/2)];
+            list.sort((a,b)=> {
+              const da = kGain(a, covered), db = kGain(b, covered);
+              if (db !== da) return db - da;
+              const ra = Math.abs(Math.floor(a/W)-center[0]) + Math.abs(a%W-center[1]);
+              const rb = Math.abs(Math.floor(b/W)-center[0]) + Math.abs(b%W-center[1]);
+              return ra - rb;
+            });
+            // small cutoff: keep top 16 moves for branching control if huge frontier
+            if (list.length > 16) list.length = 16;
+            return list;
+          }
+
+          let lastPing = start;
+
+          while (stack.length && !cancelled) {
+            const node = stack.pop();
+            nodes++;
+
+            const curH = houses(node.roads, node.covered);
+            if (curH > bestH) { bestH = curH; bestRoads = node.roads; bestCovered = node.covered; }
+
+            // Upper bound prune (simple but cheap)
+            const ub = curH + (ub_trivial(node.roads) - curH); // == N - |R|
+            if (ub <= bestH) {
+              // ping occasionally
+              const now = Date.now(); if (now - lastPing > 250) {
+                postMessage({type:'progress', nodes, bestH, bestRoads: bestRoads.toString(), bestCovered: bestCovered.toString()});
+                lastPing = now;
+              }
+              continue;
+            }
+
+            const key = node.roads.toString();
+            const prev = memo.get(key);
+            if (prev !== undefined && prev >= curH) {
+              const now = Date.now(); if (now - lastPing > 250) {
+                postMessage({type:'progress', nodes, bestH, bestRoads: bestRoads.toString(), bestCovered: bestCovered.toString()});
+                lastPing = now;
+              }
+              continue;
+            }
+            memo.set(key, curH);
+
+            // expand
+            let F = frontier(node.roads);
+            if (F === 0n) {
+              const now = Date.now(); if (now - lastPing > 250) {
+                postMessage({type:'progress', nodes, bestH, bestRoads: bestRoads.toString(), bestCovered: bestCovered.toString()});
+                lastPing = now;
+              }
+              continue;
+            }
+            const cand = [];
+            for (let i=0;i<N;i++) if ((F & bit(i))!==0n) cand.push(i);
+            orderCands(node.roads, node.covered, cand);
+
+            // push children
+            for (let j=0;j<cand.length;j++) {
+              const v = cand[j];
+              const [nr, nc] = applyAdd(node.roads, node.covered, v);
+              stack.push({roads: nr, covered: nc});
+            }
+
+            const now = Date.now();
+            if (now - lastPing > 250) {
+              postMessage({type:'progress', nodes, bestH, bestRoads: bestRoads.toString(), bestCovered: bestCovered.toString()});
+              lastPing = now;
+            }
+          }
+
+          if (cancelled) {
+            postMessage({type:'cancelled', nodes, bestH, bestRoads: bestRoads.toString(), bestCovered: bestCovered.toString()});
+          } else {
+            postMessage({type:'done', nodes, bestH, bestRoads: bestRoads.toString(), bestCovered: bestCovered.toString(), ms: Date.now()-start});
+          }
+        }
+      };
+    `;
+    const blob = new Blob([code], {type: 'application/javascript'});
+    const url = URL.createObjectURL(blob);
+    worker = new Worker(url);
+
+    worker.onmessage = (e) => {
+      const data = e.data;
+      if (data.type === 'progress') {
+        progressEl.textContent = `Searching… nodes: ${data.nodes}, best result: ${data.bestH}`;
+        nodesEl.textContent = data.nodes;
+        tryUpdateFromWorker(data.bestRoads, data.bestCovered);
+      } else if (data.type === 'done') {
+        progressEl.textContent = `Done. Explored ${data.nodes} states in ${data.ms} ms. Best result: ${data.bestH}`;
+        nodesEl.textContent = data.nodes;
+        tryUpdateFromWorker(data.bestRoads, data.bestCovered, true);
+        URL.revokeObjectURL(url);
+      } else if (data.type === 'cancelled') {
+        progressEl.textContent = `Stopped. Best found result: ${data.bestH}, explored nodes: ${data.nodes}`;
+        nodesEl.textContent = data.nodes;
+        tryUpdateFromWorker(data.bestRoads, data.bestCovered);
+        URL.revokeObjectURL(url);
+      }
+    };
+
+    // bootstrap
+    const payload = {
+      cmd: 'solve',
+      W, H, allNeigh,
+      roads: state.roads.toString(),
+      covered: state.coveredMask.toString(),
+      seedH: popcnt((state.coveredMask & ~state.roads)),
+    };
+    worker.postMessage(payload);
+  }
+  function stopExactSolver() {
+    if (worker) { worker.postMessage({cmd:'cancel'}); worker.terminate(); worker = null; }
+  }
+  function tryUpdateFromWorker(roadsStr, coveredStr, final=false) {
+    // Update board from worker’s best
+    const roads = BigInt(roadsStr), covered = BigInt(coveredStr);
+    state.roads = roads; state.coveredMask = covered;
+    render();
+  }
+
+  // ========= UI =========
+  const gridEl = document.getElementById('grid');
+  const housesEl = document.getElementById('housesCount');
+  const roadEl   = document.getElementById('roadLen');
+  const coverEl  = document.getElementById('coverPct');
+  const nodesEl  = document.getElementById('nodes');
+  const progressEl = document.getElementById('progress');
+
+
+  const state = { roads: 0n, coveredMask: 0n };
+  let cells = [];
+
+  function buildGrid() {
+    gridEl.innerHTML = '';
+    gridEl.style.gridTemplateColumns = `repeat(${W}, var(--cell))`;
+    gridEl.style.gridTemplateRows = `repeat(${H}, var(--cell))`;
+    cells = [];
+    for (let r=0;r<H;r++) {
+      for (let c=0;c<W;c++) {
+        const el = document.createElement('div');
+        el.className = 'cell';
+        const coord = document.createElement('div');
+        coord.className = 'coord';
+        coord.textContent = `${r},${c}`;
+        const ov = document.createElement('div');
+        ov.className = 'covered';
+        el.append(coord, ov);
+        gridEl.appendChild(el);
+        cells.push(el);
+      }
+    }
+  }
+  function initBoard() {
+    state.roads = 0n; state.coveredMask = 0n;
+    // start at (0,0)
+    const s = 0;
+    state.roads = add(0n, s);
+    const ns = allNeigh[s];
+    for (let k=0;k<ns.length;k++) state.coveredMask |= bit(ns[k]);
+    render();
+    progressEl.textContent = 'Ready.';
+    nodesEl.textContent = '0';
+  }
+  function render() {
+    const housesMask = state.coveredMask & ~state.roads;
+    for (let i=0;i<N;i++) {
+      const el = cells[i];
+      el.classList.toggle('road', has(state.roads,i));
+      el.classList.toggle('house', (!has(state.roads,i) && (housesMask & bit(i))!==0n));
+      el.classList.toggle('covered-on', ((state.coveredMask & bit(i))!==0n));
+    }
+    const houses = popcnt(housesMask);
+    const roadLen = popcnt(state.roads);
+    const coveredCount = popcnt(state.coveredMask | state.roads);
+    housesEl.textContent = houses;
+    roadEl.textContent = roadLen;
+    coverEl.textContent = Math.round(coveredCount * 100 / N) + '%';
+  }
+
+  // ========= Wire controls =========
+  document.getElementById('resize').addEventListener('click', () => {
+    const nw = Math.max(2, Math.min(15, +document.getElementById('w').value|0));
+    const nh = Math.max(2, Math.min(15, +document.getElementById('h').value|0));
+    W = nw; H = nh;
+    buildNeigh();
+    buildGrid();
+    initBoard();
+  });
+
+  document.getElementById('solveExact').addEventListener('click', () => {
+    progressEl.textContent = 'Starting optimal search…';
+    // seed from heuristic for strong pruning
+    const seed = heuristicSolve(state.roads, state.coveredMask, {beam: 30, restarts: 4, lookahead: 4});
+    state.roads = seed.roads;
+    state.coveredMask = seed.coveredMask;
+    render();
+    startExactSolver(state.roads, state.coveredMask);
+  });
+  document.getElementById('stopExact').addEventListener('click', () => {
+    stopExactSolver();
+  });
+
+
+  // bootstrap
+  buildNeigh();
+  buildGrid();
+  initBoard();
+})();
+</script>
+</body>
+</html>
